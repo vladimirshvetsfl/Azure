@@ -1,27 +1,3 @@
-/* DISCLAIMER
-This Sample Code is provided for the purpose of illustration only
-and is not intended to be used in a production environment.  THIS
-SAMPLE CODE AND ANY RELATED INFORMATION ARE PROVIDED AS IS
-WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED,
-INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF
-MERCHANTABILITY AND OR FITNESS FOR A PARTICULAR PURPOSE.  We
-grant You a nonexclusive, royalty-free right to use and modify
-the Sample Code and to reproduce and distribute the object code
-form of the Sample Code, provided that You agree (i) to not use
-Our name, logo, or trademarks to market Your software product in
-which the Sample Code is embedded; (ii) to include a valid
-copyright notice on Your software product in which the Sample
-
-Code is embedded; and (iii) to indemnify, hold harmless, and
-defend Us and Our suppliers from and against any claims or
-lawsuits, including attorneys’ fees, that arise or result from
-the use or distribution of the Sample Code.
-Please note None of the conditions outlined in the disclaimer
-above will supersede the terms and conditions contained within
-the Premier Customer Services Description.
-*/
-
-
 ### Resource Group ###
 resource "azurerm_resource_group" "backup_rg" {
   name     = "backup-${var.location}"
@@ -60,7 +36,7 @@ resource "azurerm_recovery_services_vault_resource_guard_association" "resource_
   resource_guard_id = azurerm_data_protection_resource_guard.resource_guard.id
 }
 
-/* resource "azurerm_monitor_diagnostic_setting" "rsv_diag" { #! Enable for diagnostic settings
+/* resource "azurerm_monitor_diagnostic_setting" "rsv_diag" { #* Enable for diagnostic settings
   name                       = "diag"
   target_resource_id         = azurerm_recovery_services_vault.rsv_geo.id
   eventhub_authorization_rule_id = ""
@@ -71,7 +47,7 @@ resource "azurerm_recovery_services_vault_resource_guard_association" "resource_
 
 } */
 
-### Backup Policy ###
+### Backup Policies ###
 
 resource "azurerm_backup_policy_vm" "backup_policy_m3" {
   name                = "bkpol-m3"
@@ -102,6 +78,85 @@ resource "azurerm_backup_policy_vm" "backup_policy_m3" {
     weeks    = ["First"]
   }
 
+}
+
+/* #* Powershell command to enable tiering
+Set-AzRecoveryServicesBackupProtectionPolicy -VaultId $VAULT_ID -Policy $POLICY -MoveToArchiveTier $true -TieringMode TierAllEligible -TierAfterDuration 3 -TierAfterDurationType Months
+*/
+
+resource "azapi_update_resource" "tiering_policies" {
+  type        = "Microsoft.RecoveryServices/vaults/backupPolicies@2023-02-01"
+  resource_id = azurerm_backup_policy_vm.backup_policy_m3.id
+
+  body = jsonencode(
+    {
+      "properties" : {
+        "backupManagementType" : "AzureIaasVM",
+        "instantRPDetails" : {},
+        "schedulePolicy" : {
+          "schedulePolicyType" : "SimpleSchedulePolicyV2",
+          "scheduleRunFrequency" : "Daily",
+          "dailySchedule" : {
+            "scheduleRunTimes" : [
+              "2024-05-14T00:30:00Z"
+            ]
+          }
+        },
+        "retentionPolicy" : {
+          "retentionPolicyType" : "LongTermRetentionPolicy",
+          "dailySchedule" : {
+            "retentionTimes" : [
+              "2024-05-14T00:30:00Z"
+            ],
+            "retentionDuration" : {
+              "count" : 90,
+              "durationType" : "Days"
+            }
+          },
+          "weeklySchedule" : {
+            "daysOfTheWeek" : [
+              "Saturday"
+            ],
+            "retentionTimes" : [
+              "2024-05-14T00:30:00Z"
+            ],
+            "retentionDuration" : {
+              "count" : 52,
+              "durationType" : "Weeks"
+            }
+          },
+          "monthlySchedule" : {
+            "retentionScheduleFormatType" : "Weekly",
+            "retentionScheduleWeekly" : {
+              "daysOfTheWeek" : [
+                "Saturday"
+              ],
+              "weeksOfTheMonth" : [
+                "First"
+              ]
+            },
+            "retentionTimes" : [
+              "2024-05-14T00:30:00Z"
+            ],
+            "retentionDuration" : {
+              "count" : 36,
+              "durationType" : "Months"
+            }
+          }
+        },
+        "tieringPolicy" : {
+          "ArchivedRP" : {
+            "tieringMode" : "TierAfter",
+            "duration" : 3,
+            "durationType" : "Months"
+          }
+        },
+        "instantRpRetentionRangeInDays" : 7,
+        "timeZone" : "UTC",
+        "policyType" : "V2"
+      }
+    }
+  )
 }
 
 resource "azurerm_backup_policy_vm" "backup_policy_m2" {
@@ -151,13 +206,13 @@ resource "azurerm_user_assigned_identity" "backup_remediation_uami" {
 }
 
 resource "azurerm_role_assignment" "policy_rbac_vm_contributor" {
-  scope                = var.subscription_id
+  scope                = "/subscriptions/${var.subscription_id}"
   principal_id         = azurerm_user_assigned_identity.backup_remediation_uami.principal_id
   role_definition_name = "Virtual Machine Contributor"
 }
 
 resource "azurerm_role_assignment" "policy_rbac_backup_contributor" {
-  scope                = var.subscription_id
+  scope                = "/subscriptions/${var.subscription_id}"
   principal_id         = azurerm_user_assigned_identity.backup_remediation_uami.principal_id
   role_definition_name = "Backup Contributor"
 }
@@ -166,7 +221,7 @@ resource "azurerm_subscription_policy_assignment" "azure_policy_assignment_m3" {
   name                 = "SnapshotRetentionM3"
   display_name         = "SnapshotRetentionM3"
   policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/345fa903-145c-4fe1-8bcd-93ec2adccde8"
-  subscription_id      = var.subscription_id
+  subscription_id      = "/subscriptions/${var.subscription_id}"
   location             = azurerm_recovery_services_vault.rsv_geo.location
 
   identity {
@@ -197,7 +252,7 @@ resource "azurerm_subscription_policy_assignment" "azure_policy_assignment_m3" {
 
 resource "azurerm_subscription_policy_remediation" "remediation" {
   name                    = "pol-remediation"
-  policy_assignment_id    = "${var.subscription_id}/providers/Microsoft.Authorization/policyAssignments/${azurerm_subscription_policy_assignment.azure_policy_assignment_m3.name}"
-  subscription_id         = var.subscription_id
+  policy_assignment_id    = "/subscriptions/${var.subscription_id}/providers/Microsoft.Authorization/policyAssignments/${azurerm_subscription_policy_assignment.azure_policy_assignment_m3.name}"
+  subscription_id         = "/subscriptions/${var.subscription_id}"
   resource_discovery_mode = "ReEvaluateCompliance"
 }

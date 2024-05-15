@@ -3,14 +3,12 @@ terraform {
     azurerm = {
       source = "hashicorp/azurerm"
     }
+    azapi = {
+      source = "Azure/azapi"
+    }
   }
 }
 
-/* provider "azurerm" {
-  features {
-    resource_group {
-      prevent_deletion_if_contains_resources = false
-    }
-
-  }
-} */
+provider "azurerm" {
+  features {}
+}

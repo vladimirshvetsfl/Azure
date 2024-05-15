@@ -5,7 +5,7 @@ variable "location" {
 
 variable "subscription_id" {
   type    = string
-  default = "/subscriptions/SUB_ID"
+  default = "SUB_ID"
 }
 
 variable "inclusion_tag_name" {
