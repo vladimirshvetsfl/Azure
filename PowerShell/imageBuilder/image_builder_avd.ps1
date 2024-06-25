@@ -26,36 +26,26 @@ the Premier Customer Services Description.
 $random = Get-Random -Minimum 1000 -Maximum 10000
 
 # Destination image resource group name
-$imageResourceGroup = 'img-bldr-rg-' + $random
-$strResourceGroup = "shared-resources-" + $random
-$scriptStorageAcc = "imgbldr" + $random
-
-# Script container
-$scriptStorageAccContainer = "script"
-
-# Script URL
-$scriptUrl = "https://$scriptStorageAcc.blob.core.windows.net/$scriptStorageAccContainer/script.ps1"
+$imageResourceGroup = "avd-img-bldr-rg-" + $random
 
 # Azure region
-$location = 'EastUS'
+$location = "EastUS2"
 
 # Name of the image to be created
-$imageTemplateName = 'windows11-22h2-avd'
+$imageTemplateName = "avd-win11-23h2-office"
 
 # Distribution properties of the managed image upon completion
-$runOutputName = 'myDistResults'
+$runOutputName = "avd-win11-23h2-office-output"
 
 # Your Azure Subscription ID
 $subscriptionID = (Get-AzContext).Subscription.Id
 
 #create resource groups
 New-AzResourceGroup -Name $imageResourceGroup -Location $location
-New-AzResourceGroup -Name $strResourceGroup -Location $location
 
 #Create variables for the role definition and identity names. These values must be unique.
-#[int]$timeInt = $(Get-Date -UFormat '%s')
 $imageRoleDefName = "Azure Image Builder " + $random
-$identityName = "imgbldr-" + $random
+$identityName = "avd-imgbldr-" + $random
 
 #Create user identity
 New-AzUserAssignedIdentity -ResourceGroupName $imageResourceGroup -Name $identityName -Location $location
@@ -64,26 +54,17 @@ New-AzUserAssignedIdentity -ResourceGroupName $imageResourceGroup -Name $identit
 $identityNameResourceId = (Get-AzUserAssignedIdentity -ResourceGroupName $imageResourceGroup -Name $identityName).Id
 $identityNamePrincipalId = (Get-AzUserAssignedIdentity -ResourceGroupName $imageResourceGroup -Name $identityName).PrincipalId
 
-#Create Storage Account and container
-New-AzStorageAccount -Location $location -ResourceGroupName $strResourceGroup -Name $scriptStorageAcc -SkuName Standard_LRS -Kind BlobStorage -AccessTier Hot
-
-$strAccountCTX = (Get-AzStorageAccount -ResourceGroupName $strResourceGroup -Name $scriptStorageAcc).Context
-New-AzStorageContainer -Context $strAccountCTX -Name $scriptStorageAccContainer
-
-Start-AzStorageBlobCopy -DestContainer $scriptStorageAccContainer -DestContext $strAccountCTX -AbsoluteUri https://raw.githubusercontent.com/vladimirshvetsfl/public/main/script.ps1 -DestBlob script.ps1
-
-New-AzRoleAssignment -RoleDefinitionName "Storage Blob Data Reader" -ObjectId $identityNamePrincipalId -Scope "/subscriptions/$subscriptionID/resourceGroups/$strResourceGroup/providers/Microsoft.Storage/storageAccounts/$scriptStorageAcc/blobServices/default/containers/$scriptStorageAccContainer"
 
 #Download the JSON configuration file, and then modify it based on the settings that are defined in this article.
-$myRoleImageCreationUrl = 'https://raw.githubusercontent.com/azure/azvmimagebuilder/master/solutions/12_Creating_AIB_Security_Roles/aibRoleImageCreation.json'
+$myRoleImageCreationUrl = "https://raw.githubusercontent.com/azure/azvmimagebuilder/master/solutions/12_Creating_AIB_Security_Roles/aibRoleImageCreation.json"
 $myRoleImageCreationPath = "c:\temp\myRoleImageCreation.json"
 
 Invoke-WebRequest -Uri $myRoleImageCreationUrl -OutFile $myRoleImageCreationPath -UseBasicParsing
 
 $Content = Get-Content -Path $myRoleImageCreationPath -Raw
-$Content = $Content -replace '<subscriptionID>', $subscriptionID
-$Content = $Content -replace '<rgName>', $imageResourceGroup
-$Content = $Content -replace 'Azure Image Builder Service Image Creation Role', $imageRoleDefName
+$Content = $Content -replace "<subscriptionID>", $subscriptionID
+$Content = $Content -replace "<rgName>", $imageResourceGroup
+$Content = $Content -replace "Azure Image Builder Service Image Creation Role", $imageRoleDefName
 $Content | Out-File -FilePath $myRoleImageCreationPath -Force
 
 #Create the role definition.
@@ -98,8 +79,8 @@ $RoleAssignParams = @{
 New-AzRoleAssignment @RoleAssignParams
 
 # Create gallery
-$myGalleryName = 'images' + $random
-$imageDefName = 'winImage'
+$myGalleryName = "avdgal01"
+$imageDefName = "avd-win11-23h2-office"
 
 New-AzGallery -GalleryName $myGalleryName -ResourceGroupName $imageResourceGroup -Location $location
 
@@ -109,29 +90,31 @@ $GalleryParams = @{
     ResourceGroupName = $imageResourceGroup
     Location          = $location
     Name              = $imageDefName
-    OsState           = 'generalized'
-    OsType            = 'Windows'
-    Publisher         = 'ShvetsCloud'
-    Offer             = 'windows-11'
-    Sku               = 'win11-22h2-avd'
+    OsState           = "generalized"
+    OsType            = "Windows"
+    Publisher         = "MicrosoftWindowsDesktop"
+    Offer             = "office-365"
+    Sku               = "win11-23h2-avd-m365"
     HyperVGeneration  = "V2"
 }
-New-AzGalleryImageDefinition @GalleryParams
+
+$SecurityType = @{Name = "SecurityType"; Value = "TrustedlaunchSupported" }
+New-AzGalleryImageDefinition @GalleryParams -Feature $SecurityType
 
 #Create a VM Image Builder source object.
 $SrcObjParams = @{
     PlatformImageSource = $true
-    Publisher           = 'MicrosoftWindowsDesktop'
-    Offer               = 'windows-11'
-    Sku                 = 'win11-22h2-avd'
-    Version             = 'latest'
+    Publisher           = "MicrosoftWindowsDesktop"
+    Offer               = "office-365"
+    Sku                 = "win11-23h2-avd-m365"
+    Version             = "latest"
 }
 $srcPlatform = New-AzImageBuilderTemplateSourceObject @SrcObjParams
 
 #Create a VM Image Builder distributor object.
 $disObjParams = @{
     SharedImageDistributor = $true
-    ArtifactTag            = @{tag = 'dis-share' }
+    ArtifactTag            = @{tag = "dis-share" }
     GalleryImageId         = "/subscriptions/$subscriptionID/resourceGroups/$imageResourceGroup/providers/Microsoft.Compute/galleries/$myGalleryName/images/$imageDefName"
     ReplicationRegion      = $location
     RunOutputName          = $runOutputName
@@ -141,20 +124,12 @@ $disSharedImg = New-AzImageBuilderTemplateDistributorObject @disObjParams
 
 $ImgCustomParams01 = @{
     PowerShellCustomizer = $true
-    Name                 = 'script'
-    RunElevated          = $false
-    ScriptUri            = $scriptUrl
-}
-$Customizer01 = New-AzImageBuilderTemplateCustomizerObject @ImgCustomParams01
-
-<# $ImgCustomParams02 = @{
-    PowerShellCustomizer = $true
-    Name                 = 'optimizeAVD'
+    Name                 = "optimizeAVD"
     RunElevated          = $true
     runAsSystem          = $true
     ScriptUri            = "https://raw.githubusercontent.com/danielsollondon/azvmimagebuilder/master/solutions/14_Building_Images_WVD/1_Optimize_OS_for_WVD.ps1"
 }
-$Customizer02 = New-AzImageBuilderTemplateCustomizerObject @ImgCustomParams02 #>
+$Customizer01 = New-AzImageBuilderTemplateCustomizerObject @ImgCustomParams01
 
 #Create a VM Image Builder template.
 $ImgTemplateParams = @{
@@ -167,6 +142,9 @@ $ImgTemplateParams = @{
     UserAssignedIdentityId = $identityNameResourceId
 }
 New-AzImageBuilderTemplate @ImgTemplateParams
+
+#Start image build
+$imageBuilderJob = Start-AzImageBuilderTemplate -ResourceGroupName $imageResourceGroup -Name $imageTemplateName -AsJob
 
 #Start image build
 Start-AzImageBuilderTemplate -ResourceGroupName $imageResourceGroup -Name $imageTemplateName -NoWait
